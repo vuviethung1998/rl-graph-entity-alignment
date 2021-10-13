@@ -8,24 +8,32 @@ from framework.utils import build_adj_matrix_and_embeddings
 
 G1_adj_matrix, G2_adj_matrix, emb1, emb2, ground_truth = build_adj_matrix_and_embeddings()
 
-def get_k_nearest_candidate(target_node, emb2, k=11):
-    nearest_list = [(i, emb2[i]) for i in range(len(emb2))]
-    list_similarity = sorted(nearest_list, key=(
-        lambda nearest_node: 1 - spatial.distance.cosine(nearest_node[1], emb2[target_node])), reverse=True)
-    list_similarity = list_similarity[:k]
-    k_nearest_nodes = [item[0] for item in list_similarity]
+
+def get_cosim_hash_table(emb1, emb2):
+    cosim_hash_table = {}
+    for i in range(len(emb1)):
+        cur_vec_1 = emb1[i]
+        lst_cosim = [(j, 1 - spatial.distance.cosine(cur_vec_1, emb2[j]))
+                     for j in range(len(emb2))]
+        lst_sorted_cosim = sorted(lst_cosim, key=(
+            lambda node: node[1]), reverse=True)
+        cosim_hash_table.update({i: lst_sorted_cosim})
+    return cosim_hash_table
+
+
+def get_k_nearest_candidate(target_node, cosim_hash_table, k=11):
+    k_nearest_nodes = [item[0] for item in cosim_hash_table[target_node][:k]]
     return k_nearest_nodes
 
 
-def getHashTable(ground_truth, emb2):
-    '''
-      Input: groundtruth, 
-    '''
-    hash_mapping_node = {}
-    for source_node, target_node in ground_truth.items():
-        hash_mapping_node[source_node] = get_k_nearest_candidate(
-            target_node, emb2)
-    return hash_mapping_node
+def getHashTable(ground_truth, cosim_hash_table):
+  '''
+    Input: groundtruth, 
+  '''
+  hash_mapping_node = {}
+  for source_node, target_node in ground_truth.items():
+    hash_mapping_node[source_node] = get_k_nearest_candidate(target_node, cosim_hash_table)
+  return hash_mapping_node
 
 
 def getAlignTable():
@@ -90,7 +98,8 @@ class SequentialMatchingEnv(gym.Env):
 
         self.seed = random.randint(0, 100)
 
-        self.hash_table = getHashTable(ground_truth, emb2)
+        cosim_hash_table = get_cosim_hash_table(emb1, emb2)
+        self.hash_table = getHashTable(ground_truth, cosim_hash_table)
         self.list_state = getListState(self.hash_table)
         # init total reward
         self.total_reward = 0
@@ -136,7 +145,7 @@ class SequentialMatchingEnv(gym.Env):
             if not isAligned(current_state):
                 score = 0
             elif isAligned(current_state):
-                score = -10
+                score = -1
         else:
             raise ValueError(
                 "Received invalid action={} which is not part of the action space".format(action))

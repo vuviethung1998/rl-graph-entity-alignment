@@ -32,8 +32,8 @@ def build_adj_matrix_and_embeddings():
     G2_nodes = len(np.unique(g2))
     # print("num nodes: ", G1_nodes)
     # print("num nodes: ", G2_nodes)
-    G1_adj_matrix = np.empty(shape=(G1_nodes, G1_nodes))
-    G2_adj_matrix = np.empty(shape=(G2_nodes, G2_nodes))
+    G1_adj_matrix = np.zeros(shape=(G1_nodes, G1_nodes))
+    G2_adj_matrix = np.zeros(shape=(G2_nodes, G2_nodes))
     # print(mapping_index_1)
     # print(mapping_index_2)
     for i in range(len(g1)):
@@ -52,8 +52,9 @@ def build_adj_matrix_and_embeddings():
     # Build embeddings
     emb1 = []
     emb2 = []
-    # transitivity = np.load("/content/drive/MyDrive/Colab Notebooks/RLWithGraphEntityAlignment/data/transitivity_emb.npy")
+    # transitivity = np.load("./data/data/transitivity_emb.npy")
     proximi = np.load("./data/data/proximi_emb.npy")
+    print(proximi)
     for i, _ in enumerate(mapping_index_1):
         emb1.append(proximi[i])
     for i, _ in enumerate(mapping_index_2):

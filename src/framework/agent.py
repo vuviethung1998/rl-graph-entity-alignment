@@ -1,3 +1,4 @@
+from scipy import spatial
 import torch
 from torch.nn.parameter import Parameter
 import torch.nn as nn
@@ -67,6 +68,7 @@ class Agent(nn.Module):
         self.layer2 = GCN_layer(
             first_adj_matrix, second_adj_matrix, outputs_shape, n_classes)
         self.n_classes = n_classes
+        self.gamma = gamma
 
         if activation == 'Tanh':
             self.activation = nn.Tanh()
@@ -84,8 +86,26 @@ class Agent(nn.Module):
             n_classes, n_classes), requires_grad=True)
         self.W_p = Parameter(torch.rand(1, 1), requires_grad=True)
         self.bias_h = Parameter(torch.rand(1), requires_grad=True)
-        self.gamma = gamma
 
+    @classmethod
+    # Do later
+    def get_cosim_hash_table(emb1, emb2):
+        cosim_hash_table = {}
+        for i in range(len(emb1)):
+            cur_vec_1 = emb1[i]
+            lst_cosim = [(j, 1 - spatial.distance.cosine(cur_vec_1, emb2[j]))
+                        for j in range(len(emb2))]
+            lst_sorted_cosim = sorted(lst_cosim, key=(
+                lambda node: node[1]), reverse=True)
+            cosim_hash_table.update({i: lst_sorted_cosim})
+        return cosim_hash_table
+
+    @classmethod
+    # Do later
+    def get_k_nearest_candidate(target_node, cosim_hash_table, k=11):
+        k_nearest_nodes = [item[0] for item in cosim_hash_table[target_node][:k]]
+        return k_nearest_nodes
+        
     # Gett k nearest opponents for mutual information estimator
     def get_k_nearest_opponent(self, G, node, k=3):
         G_list = [(i, item) for i, item in enumerate(G)]
@@ -129,18 +149,19 @@ class Agent(nn.Module):
         return policy
 
     # Train model using reinforcement learning
-    @classmethod
     def train_model(self, first_embeddings, second_embeddings, net, transitions, optimizer):
+        
         states, actions, rewards = transitions.state, transitions.action, transitions.reward
-
         actions = torch.stack(actions).to(device)
         rewards = torch.Tensor(rewards).to(device)
         returns = torch.zeros_like(rewards).to(device)
+        policies = torch.zeros_like(actions).to(device)
         vf = torch.zeros_like(rewards).to(device)
         total_loss = 0
         running_return = 0
+        
         for t in reversed(range(len(rewards))):
-            # calculate G from the last transition
+            # calculate G, begin from the last transition
             running_return = self.gamma**0 * \
                 rewards[t] + self.gamma * running_return
             returns[t] = running_return
@@ -148,19 +169,21 @@ class Agent(nn.Module):
                 vf[t] = 0.01
             else:
                 vf[t] = running_return/returns.sum()
-            # get value function estimates
-            advantage = returns[t] - vf[t]
+            
+            policies[t] = net(first_embeddings, second_embeddings, states[t])
 
-            # loss
-            policies = net(first_embeddings, second_embeddings, states[t])
-            # sum all features/embedding vectors of the state
-            log_policies = (torch.log(policies) *
-                            actions[t].detach()).sum(dim=1)
-            loss = (-log_policies * advantage).sum()
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            total_loss += loss
+        # get value function estimates
+        # advantage = returns - vf
+        advantage = returns
+        # loss
+        # sum all features/embedding vectors of the state
+        log_policies = (torch.log(policies) *
+                        actions.detach()).sum(dim=1)
+        loss = (-log_policies * advantage).sum()
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        total_loss += loss
 
         return total_loss
 
