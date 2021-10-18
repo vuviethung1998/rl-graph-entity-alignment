@@ -27,13 +27,14 @@ def get_k_nearest_candidate(target_node, cosim_hash_table, k=11):
 
 
 def getHashTable(ground_truth, cosim_hash_table):
-  '''
-    Input: groundtruth, 
-  '''
-  hash_mapping_node = {}
-  for source_node, target_node in ground_truth.items():
-    hash_mapping_node[source_node] = get_k_nearest_candidate(target_node, cosim_hash_table)
-  return hash_mapping_node
+    '''
+      Input: groundtruth, 
+    '''
+    hash_mapping_node = {}
+    for source_node, target_node in ground_truth.items():
+        hash_mapping_node[source_node] = get_k_nearest_candidate(
+            target_node, cosim_hash_table)
+    return hash_mapping_node
 
 
 def getAlignTable():
@@ -64,7 +65,7 @@ def popCurrentState(lst_state, current_state):
         key_state_2 = state[1]
         # print('cur_state: ', state)
 
-        if key_state_1 == key1 or key_state_2 == key1 or key_state_1 == key2 or key_state_2 == key2:
+        if key_state_1 == key1 or key_state_2 == key2:
             lst_remove.append(state)
     lst_final = list(set(lst_state) - set(lst_remove))
     return lst_final
@@ -132,14 +133,18 @@ class SequentialMatchingEnv(gym.Env):
 
         if action == self.MATCH:
             # if match pop all state containing two key of current state
-            self.lst_state = popCurrentState(self.lst_state, current_state)
+            # self.lst_state = popCurrentState(self.lst_state, current_state)
 
             # check value if true match
-            if isAligned(current_state):
+            if isAligned(current_state):  # label = 1 => difficulty = Cemax,ex - Cexey
+                self.lst_state = popCurrentState(self.lst_state, current_state)
                 score = 1
 
+            # label = 0 => difficulty = theta - (Cemax,ex - Cexey)
             elif not isAligned(current_state):
+                self.lst_state.pop(0)
                 score = 0
+                # else: score = 0 # neu skip, score = 0 va
         elif action == self.UNMATCH:
             self.lst_state.pop(0)
             if not isAligned(current_state):

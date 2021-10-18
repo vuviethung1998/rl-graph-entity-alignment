@@ -3,17 +3,17 @@ import numpy as np
 
 def build_adj_matrix_and_embeddings():
     # Build adj matrix
-    file1 = open('./data/data/rel_triples_id_1.txt', 'r')
+    file1 = open('./data/rel_triples_id_1.txt', 'r')
     lines1 = file1.readlines()
-    lines1 = lines1[:100]
+    lines1 = lines1[:500]
     g1 = []
     for line in lines1:
         g1.append([int(x) for x in line.strip().split("\t")])
     g1 = np.array(g1)
 
-    file2 = open('./data/data/rel_triples_id_2.txt', 'r')
+    file2 = open('./data/rel_triples_id_2.txt', 'r')
     lines2 = file2.readlines()
-    lines2 = lines2[:100]
+    lines2 = lines2[:500]
     g2 = []
     for line in lines2:
         g2.append([int(x) for x in line.strip().split("\t")])
@@ -30,12 +30,10 @@ def build_adj_matrix_and_embeddings():
 
     G1_nodes = len(np.unique(g1))
     G2_nodes = len(np.unique(g2))
-    # print("num nodes: ", G1_nodes)
-    # print("num nodes: ", G2_nodes)
+
     G1_adj_matrix = np.zeros(shape=(G1_nodes, G1_nodes))
     G2_adj_matrix = np.zeros(shape=(G2_nodes, G2_nodes))
-    # print(mapping_index_1)
-    # print(mapping_index_2)
+
     for i in range(len(g1)):
         head = g1[i][0]
         tail = g1[i][2]
@@ -46,15 +44,11 @@ def build_adj_matrix_and_embeddings():
         tail = g2[i][2]
         G2_adj_matrix[mapping_index_2[head]][mapping_index_2[tail]] = 1
         G2_adj_matrix[mapping_index_2[tail]][mapping_index_2[head]] = 1
-    # print(np.count_nonzero(G1_adj_matrix == 1))
-    # print(np.count_nonzero(G2_adj_matrix == 1))
 
     # Build embeddings
     emb1 = []
     emb2 = []
-    # transitivity = np.load("./data/data/transitivity_emb.npy")
-    proximi = np.load("./data/data/proximi_emb.npy")
-    print(proximi)
+    proximi = np.load("./data/proximi_emb.npy")
     for i, _ in enumerate(mapping_index_1):
         emb1.append(proximi[i])
     for i, _ in enumerate(mapping_index_2):
@@ -64,7 +58,7 @@ def build_adj_matrix_and_embeddings():
 
     # Get ground truth
     ground_truth = {}
-    file_gt = open('./data/data/ground_truth.txt', 'r')
+    file_gt = open('./data/ground_truth.txt', 'r')
     lines = file_gt.readlines()
     gt = []
     for line in lines:
