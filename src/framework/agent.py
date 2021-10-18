@@ -3,7 +3,6 @@ import torch
 from torch.nn.parameter import Parameter
 import torch.nn as nn
 import torch.nn.functional as F
-from framework.env import isAligned
 import numpy as np
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -30,9 +29,6 @@ class GCN_layer(nn.Module):
     def __init__(self, first_adj_matrix, second_adj_matrix, input_shape, hidden_states):
         super(GCN_layer, self).__init__()
         self.fc = nn.Linear(input_shape, hidden_states)
-        self.W = Parameter(torch.rand(
-            input_shape, hidden_states), requires_grad=True)
-        self.bias = Parameter(torch.rand(hidden_states), requires_grad=True)
         A = torch.from_numpy(first_adj_matrix).type(
             torch.LongTensor).to(device)
         I = torch.eye(A.shape[0]).to(device)
@@ -56,7 +52,6 @@ class GCN_layer(nn.Module):
             aggregate = torch.mm(self.A_hat_x, input_features)
         else:
             aggregate = torch.mm(self.A_hat_y, input_features)
-        # propagate = torch.mm(aggregate, self.W)+self.bias
         propagate = self.fc(aggregate)
         return propagate
 
@@ -84,29 +79,18 @@ class Agent(nn.Module):
         self.softmax = nn.Softmax(dim=1)
         self.sigmoid = nn.Sigmoid()
         self.fc_h = nn.Linear(output_shape*2, 128)
-        self.fc_p = nn.Linear(128, 2)
+        # self.fc_p = nn.Linear(128+output_shape, 2) # enable MI
+        self.fc_p = nn.Linear(128, 2) # unenable MI
         self.W_f = Parameter(torch.rand(
-            output_shape, output_shape), requires_grad=True)
+            output_shape, 1), requires_grad=True)
 
     @classmethod
-    # Do later
     def get_cosim_hash_table(emb1, emb2):
-        cosim_hash_table = {}
-        for i in range(len(emb1)):
-            cur_vec_1 = emb1[i]
-            lst_cosim = [(j, 1 - spatial.distance.cosine(cur_vec_1, emb2[j]))
-                         for j in range(len(emb2))]
-            lst_sorted_cosim = sorted(lst_cosim, key=(
-                lambda node: node[1]), reverse=True)
-            cosim_hash_table.update({i: lst_sorted_cosim})
-        return cosim_hash_table
+        pass
 
     @classmethod
-    # Do later
     def get_k_nearest_candidate(target_node, cosim_hash_table, k=11):
-        k_nearest_nodes = [item[0]
-                           for item in cosim_hash_table[target_node][:k]]
-        return k_nearest_nodes
+        pass
 
     # Gett k nearest opponents for mutual information estimator
     def get_k_nearest_opponent(self, G, node, k=3):
@@ -138,17 +122,18 @@ class Agent(nn.Module):
         h = self.sigmoid(self.fc_h(cat_gxgy))
 
         # # Mutual information estimator
-        # f = torch.exp(g_x.T*self.W_f*g_y)
-        # # Bao gồm cả chính node e_y nên lấy k=11. Paper nói là k=10
-        # k_nearest_opponent_vector = self.get_k_nearest_opponent(G_y, g_y, k=11)
-        # list_temp = [torch.exp(g_x.T*self.W_f*oppo)
-        #              for oppo in k_nearest_opponent_vector]
-        # f_oppo = torch.stack(list_temp).sum()
+        # f = torch.exp(torch.matmul(torch.matmul(g_x, self.W_f), g_y))
+        # # Paper nói là k=10 nhưng bao gồm cả chính node e_y nên lấy k=11.
+        # k_nearest_opponent_vector = self.get_k_nearest_opponent(G_y, g_x, k=11)
+        # f_oppo = torch.zeros_like(f)
+        # for oppo in k_nearest_opponent_vector:
+        #     oppo = torch.reshape(oppo, (1, oppo.shape[0]))
+        #     f_oppo = torch.add(f_oppo, torch.exp(torch.matmul(torch.matmul(g_x, self.W_f), oppo)))
         # I = f/f_oppo
-        # print(I.shape)
 
         # Policy
-        policy = self.softmax(self.fc_p(h))
+        # policy = self.softmax(self.fc_p(torch.cat((h, I), 1))) # enable MI
+        policy = self.softmax(self.fc_p(h)) # unenable MI
         return policy
 
     # Train model using reinforcement learning
