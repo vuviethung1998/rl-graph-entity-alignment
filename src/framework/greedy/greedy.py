@@ -5,8 +5,8 @@ import time
 
 import numpy as np
 
-from framework.modules.util import *
-from framework.modules.similarity import *
+from framework.greedy.util import *
+from framework.greedy.similarity import *
 
 def calculate_rank(idx, sim_mat, top_k, accurate, total_num):
     """

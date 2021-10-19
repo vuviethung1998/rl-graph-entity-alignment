@@ -82,15 +82,7 @@ class Agent(nn.Module):
         # self.fc_p = nn.Linear(128+output_shape, 2) # enable MI
         self.fc_p = nn.Linear(128, 2) # unenable MI
         self.W_f = Parameter(torch.rand(
-            output_shape, 1), requires_grad=True)
-
-    @classmethod
-    def get_cosim_hash_table(emb1, emb2):
-        pass
-
-    @classmethod
-    def get_k_nearest_candidate(target_node, cosim_hash_table, k=11):
-        pass
+            output_shape, 1).to(device), requires_grad=True)
 
     # Gett k nearest opponents for mutual information estimator
     def get_k_nearest_opponent(self, G, node, k=3):
@@ -122,7 +114,7 @@ class Agent(nn.Module):
         h = self.sigmoid(self.fc_h(cat_gxgy))
 
         # # Mutual information estimator
-        # f = torch.exp(torch.matmul(torch.matmul(g_x, self.W_f), g_y))
+        # f = torch.matmul(torch.matmul(g_x, self.W_f), g_y)
         # # Paper nói là k=10 nhưng bao gồm cả chính node e_y nên lấy k=11.
         # k_nearest_opponent_vector = self.get_k_nearest_opponent(G_y, g_x, k=11)
         # f_oppo = torch.zeros_like(f)

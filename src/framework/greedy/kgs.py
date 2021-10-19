@@ -1,5 +1,5 @@
-from framework.modules.kg import KG
-from framework.modules.read import *
+from framework.greedy.kg import KG
+from framework.greedy.read import *
 
 class KGs:
     def __init__(self, kg1: KG, kg2: KG, train_links, test_links, valid_links=None, mode='mapping', ordered=True, linkpred=False):

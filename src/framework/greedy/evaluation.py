@@ -1,6 +1,6 @@
 import numpy as np
 
-from framework.modules.greedy import greedy_alignment
+from framework.greedy.greedy import greedy_alignment
 
 def test_(embeds1, embeds2, mapping, top_k, threads_num, metric='inner', normalize=False, csls_k=0, accurate=True, simi_matrix=None, return_simi=False):
     if mapping is None:

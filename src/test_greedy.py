@@ -5,8 +5,8 @@ import pandas as pd
 import string
 from tqdm import tqdm
 import os
-from framework.modules.kgs import *
-from framework.modules.evaluation import *
+from framework.greedy.kgs import *
+from framework.greedy.evaluation import *
 from framework.utils import *
 
 def test(save=True, simi_matrix=None):

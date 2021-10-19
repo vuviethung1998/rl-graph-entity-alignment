@@ -4,7 +4,7 @@ from scipy.spatial.distance import cdist
 from sklearn import preprocessing
 from sklearn.metrics.pairwise import euclidean_distances
 
-from framework.modules.util import task_divide
+from framework.greedy.util import task_divide
 
 def csls_sim(sim_mat, k):
     """
