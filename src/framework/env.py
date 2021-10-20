@@ -5,25 +5,46 @@ from gym import spaces
 import random
 from scipy import spatial
 from framework.utils import build_adj_matrix_and_embeddings
+from sklearn import preprocessing
+
 
 G1_adj_matrix, G2_adj_matrix, emb1, emb2, ground_truth = build_adj_matrix_and_embeddings()
 
+# def get_cosim_hash_table(emb1, emb2):
+#     cosim_hash_table = {}
+#     for i in range(len(emb1)):
+#         cur_vec_1 = emb1[i]
+#         lst_cosim = [(j, 1 - spatial.distance.cosine(cur_vec_1, emb2[j]))
+#                      for j in range(len(emb2))]
+#         lst_sorted_cosim = sorted(lst_cosim, key=(
+#             lambda node: node[1]), reverse=True)
+#         cosim_hash_table.update({i: lst_sorted_cosim})
+#     return cosim_hash_table
 
-def get_cosim_hash_table(emb1, emb2):
-    cosim_hash_table = {}
-    for i in range(len(emb1)):
-        cur_vec_1 = emb1[i]
-        lst_cosim = [(j, 1 - spatial.distance.cosine(cur_vec_1, emb2[j]))
-                     for j in range(len(emb2))]
-        lst_sorted_cosim = sorted(lst_cosim, key=(
-            lambda node: node[1]), reverse=True)
-        cosim_hash_table.update({i: lst_sorted_cosim})
-    return cosim_hash_table
 
+# def get_k_nearest_candidate(target_node, cosim_hash_table, k=11):
+#     k_nearest_nodes = [item[0] for item in cosim_hash_table[target_node][:k]]
+#     return k_nearest_nodes
 
-def get_k_nearest_candidate(target_node, cosim_hash_table, k=11):
-    k_nearest_nodes = [item[0] for item in cosim_hash_table[target_node][:k]]
-    return k_nearest_nodes
+def get_cosim_hash_table(emb1, emb2, top_k=11):
+  emb1 = preprocessing.normalize(emb1)
+  emb2 = preprocessing.normalize(emb2)
+  sim_mat = np.matmul(emb1, emb2.T) 
+  num  = sim_mat.shape[0]
+  
+  idx = list(range(num)) # list true index 
+
+  cosim_hash_table = {}
+
+  for i in idx:
+    g1_target = idx[i]
+    rank = np.argpartition(-sim_mat[i, :], np.array(top_k)-1)
+    cosim_hash_table.update({g1_target: [ j for j in rank[0:top_k] ]})
+  return cosim_hash_table     
+
+def get_k_nearest_candidate(target_node, cosim_hash_table):
+  # k_nearest_nodes=  [item[0] for item in  ]
+  return cosim_hash_table[target_node]
 
 
 def getHashTable(ground_truth, cosim_hash_table):
