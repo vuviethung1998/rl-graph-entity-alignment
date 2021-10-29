@@ -16,6 +16,14 @@ def save_results(results_list, path_log):
         writer.writerow(results_list)
 
 
+def normalize_prob(prob):
+    max_len = max([len(v) for _, v in prob.items()])
+    for k, v in prob.items():
+        # if prob array of one paired state is not equal (due to skip rate)
+        if len(v) != max_len:
+            prob[k].append(prob[k][-1]) # append the last prob
+    return prob
+
 def test_subgraph_build_adj_matrix_and_embeddings():
     # Build adj matrix
     file1 = open('./data/rel_triples_id_1.txt', 'r')
@@ -84,7 +92,6 @@ def build_embeddings():
     # Build adj matrix
     file1 = open('./data/rel_triples_id_1.txt', 'r')
     lines1 = file1.readlines()
-    lines1 = lines1[:100]
     g1 = []
     for line in lines1:
         tmp_arr =  [int(x) for x in line.strip().split("\t")]
@@ -93,7 +100,6 @@ def build_embeddings():
 
     file2 = open('./data/rel_triples_id_2.txt', 'r')
     lines2 = file2.readlines()
-    lines2 = lines2[:100]
     g2 = []
     for line in lines2:
         tmp_arr =  [int(x) for x in line.strip().split("\t")]
@@ -103,42 +109,52 @@ def build_embeddings():
     unique1 = np.unique(g1)
     unique2 = np.unique(g2)
 
-    print('g1: {}'.format(unique1))
-    print('len g1: {}'.format(len(unique1)))
+    mapping_index_1 = {}
+    mapping_index_2 = {}
+    unique1 = np.unique(g1)
+    unique2 = np.unique(g2)
+    for i in range(len(unique1)):
+        mapping_index_1[unique1[i]] = i
 
-
-    print('g2: {}'.format(unique2))
-    print('len g2: {}'.format(len(unique2)))
-
+    for i in range(len(unique2)):
+        mapping_index_2[unique2[i]] = i
+    
     # Build embeddings
-    emb1 = []
-    emb2 = []
-    proximi = np.load("./data/proximi_emb.npy")
-    transi = np.load("./data/transitivity_emb.npy")
-    final_emb = np.concatenate((normalize(proximi), transi * 0.65), axis=1)
+    emb1, emb2 = [], []
+    # proximi = np.load("./data/proximi_emb.npy")
+    # transi = np.load("./data/transitivity_emb.npy")
+    # final_emb = np.concatenate((normalize(proximi), transi * 0.65), axis=1)
 
-    for i in np.array(unique1):
-        emb1.append(final_emb[i])
-    for i in np.array(unique2):
-        emb2.append(final_emb[i])
+    # for i in np.array(unique1):
+    #     emb1.append(final_emb[i])
+    # for i in np.array(unique2):
+    #     emb2.append(final_emb[i])
+    # emb1 = np.array(emb1)
+    # emb2 = np.array(emb2)
+
+    proximi = np.load("./data/IKAMI/D_W_15K_V2/proximi_emb.npy")
+    for i, _ in enumerate(mapping_index_1):
+        emb1.append(proximi[i])
+    for i, _ in enumerate(mapping_index_2):
+        emb2.append(proximi[i])
     emb1 = np.array(emb1)
     emb2 = np.array(emb2)
 
     return emb1, emb2, unique1, unique2
 
-def build_adj_matrix_and_embeddings():
+def build_adj_matrix_and_embeddings(is_training):
     # Build adj matrix
-    file1 = open('./data/rel_triples_id_1.txt', 'r')
+    file1 = open('./data/IKAMI/D_W_15K_V2/rel_triples_1.txt', 'r')
     lines1 = file1.readlines()
-    lines1 = lines1[:1000]
+    lines1 = lines1[:200]
     g1 = []
     for line in lines1:
         g1.append([int(x) for x in line.strip().split("\t")])
     g1 = np.array(g1)
 
-    file2 = open('./data/rel_triples_id_2.txt', 'r')
+    file2 = open('./data/IKAMI/D_W_15K_V2/rel_triples_2.txt', 'r')
     lines2 = file2.readlines()
-    lines2 = lines2[:1000]
+    lines2 = lines2[:200]
     g2 = []
     for line in lines2:
         g2.append([int(x) for x in line.strip().split("\t")])
@@ -162,19 +178,19 @@ def build_adj_matrix_and_embeddings():
 
     for i in range(len(g1)):
         head = g1[i][0]
-        tail = g1[i][2]
+        tail = g1[i][1]
         G1_adj_matrix[mapping_index_1[head]][mapping_index_1[tail]] = 1
         G1_adj_matrix[mapping_index_1[tail]][mapping_index_1[head]] = 1
     for i in range(len(g1)):
         head = g2[i][0]
-        tail = g2[i][2]
+        tail = g2[i][1]
         G2_adj_matrix[mapping_index_2[head]][mapping_index_2[tail]] = 1
         G2_adj_matrix[mapping_index_2[tail]][mapping_index_2[head]] = 1
 
     # Build embeddings
     emb1 = []
     emb2 = []
-    proximi = np.load("./data/proximi_emb.npy")
+    proximi = np.load("./data/IKAMI/D_W_15K_V2/_proximity.npy")
     for i, _ in enumerate(mapping_index_1):
         emb1.append(proximi[i])
     for i, _ in enumerate(mapping_index_2):
@@ -183,8 +199,8 @@ def build_adj_matrix_and_embeddings():
     emb2 = np.array(emb2)
 
     # Get ground truth
-    ground_truth = {}
-    file_gt = open('./data/ground_truth.txt', 'r')
+    tmp_ground_truth = {}
+    file_gt = open('./data/IKAMI/D_W_15K_V2/ground_truth.txt', 'r')
     lines = file_gt.readlines()
     gt = []
     for line in lines:
@@ -195,7 +211,17 @@ def build_adj_matrix_and_embeddings():
         index_x = gt[i][0]
         index_y = gt[i][1]
         if index_x in mapping_index_1 and index_y in mapping_index_2:
-            ground_truth[mapping_index_1[index_x]] = mapping_index_2[index_y]
+            tmp_ground_truth[mapping_index_1[index_x]] = mapping_index_2[index_y]
+
+    ground_truth = {}
+    if is_training:
+        for key, value in tmp_ground_truth.items():
+            ground_truth[key] = value
+            if len(ground_truth) == int(0.6*len(tmp_ground_truth)):
+                break
+    else:
+        for key, value in tmp_ground_truth.items():
+            ground_truth[key] = value
 
     return G1_adj_matrix, G2_adj_matrix, emb1, emb2, ground_truth
 

@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
 import numpy as np
-from framework.utils import build_adj_matrix_and_embeddings
+from framework.utils import build_adj_matrix_and_embeddings, normalize_prob
 from framework.env import SequentialMatchingEnv
 from framework.agent import Agent
 from framework.memory import Memory
@@ -15,16 +15,14 @@ import sys
 import argparse
 import os
 
-
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
+device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
 
 def seed():
     np.random.seed(2)
     torch.manual_seed(500)
 
 
-def plot(results, log_results, prob):
+def plot(results, log_results, prob, num_gt):
     results = np.array(results)
     results = pd.DataFrame(
         results, columns=['episode', 'reward', 'agent_loss', 'time'])
@@ -33,17 +31,21 @@ def plot(results, log_results, prob):
     prob_df.to_csv(log_results + "/prob.csv", index=False)
 
     # Visualization
-    sns.lineplot(data=results.reward, color="g")
+    sns.lineplot(data=results.reward/num_gt, color="g")
     plt.legend(labels=["Reward"])
     plt.xlabel("Episode")
     plt.ylabel("Reward")
     plt.savefig(log_results + '/rewards.png')
 
 
-def train():
+def train(args):
     print("Loading data...")
-    G1_adj_matrix, G2_adj_matrix, emb1, emb2, ground_truth = build_adj_matrix_and_embeddings()
-    number_gt = len(ground_truth)
+    G1_adj_matrix, G2_adj_matrix, emb1, emb2, ground_truth = build_adj_matrix_and_embeddings(
+        True)
+    num_gt = len(ground_truth)
+    print("Num nodes in G1: ", len(G1_adj_matrix))
+    print("Num nodes in G2: ", len(G2_adj_matrix))
+    print("Num ground_truth: ", num_gt)
 
     first_embeddings_torch = torch.from_numpy(
         emb1).type(torch.FloatTensor).to(device)
@@ -59,39 +61,40 @@ def train():
 
     print("Building environment...")
     env = SequentialMatchingEnv()
-    episodes = 5
+    early_stopping = 0
     results = {}
-    results["training"] = [] # results of each episode
-    results["prob"] = {} # to check probability of each pair after one episode
+    results["num_gt"] = num_gt
+    results["training"] = []  # results of each episode
+    results["prob"] = {}  # to check probability of each pair after one episode
     for k, v in ground_truth.items():
-        results["prob"][(k, v)] = []
+        results["prob"][(k, v)] = [0]
 
     print("Training...")
-    for ep in tqdm(range(1, episodes + 1)):
+    for ep in tqdm(range(1, args.episode + 1)):
         start_episode = time.time()
-        
+
         # Reset environment
-        idx = env.reset()
-        lst_state = []
+        idx = env.reset(ep)
         memory = Memory()
         reward_episode = 0
         done = False
-        # Define start_episode for pre-calculate consine similarity in function "foward" of agent
-        start_episode = True
+
+        # Define is_start for pre-calculate consine similarity in function "forward" of agent
+        is_start = True
         action, p = agent.get_action(first_embeddings_torch,
-                                     second_embeddings_torch, [idx], start_episode)
-        start_episode = False
+                                     second_embeddings_torch, [idx], is_start)
+        is_start = False
 
         # Get policy, action and reward
         while True:
             if isAligned(idx):
                 results["prob"][idx].append(p[1])
-            cur_idx, next_idx, _, reward, done, _ = env.step(action, ep)
-            if done:
-                break
-
+            next_idx, reward, done = env.step(action)
             # add reward
             reward_episode += reward
+
+            if done:
+                break
 
             # push to memory for training model
             action_one_hot = torch.zeros(2)
@@ -100,12 +103,13 @@ def train():
 
             # next state
             idx = next_idx
-            lst_state.append((cur_idx, action, reward))
 
             # get environment state
             action, p = agent.get_action(first_embeddings_torch,
-                                         second_embeddings_torch, [idx], start_episode)
+                                         second_embeddings_torch, [idx], is_start)
 
+            # just for storing "prob" results
+        results["prob"] = normalize_prob(results["prob"])
         # Train model
         loss = agent.train_model_seq(
             first_embeddings_torch, second_embeddings_torch, agent, memory.sample(), optimizer)
@@ -114,27 +118,33 @@ def train():
         ).detach().numpy(), end_episode - start_episode])
 
         # Monitoring
-        if ep % 50 == 0:
-            print("Episode: {}   Reward: {}/{}   Agent loss: {}".format(
-                str(ep), str(reward_episode), str(number_gt), str(loss.cpu().detach().numpy())))
-        if reward_episode == number_gt:
-            print(
-                "Goal reached! Reward={}/{}".format(str(reward_episode), str(number_gt)))
-            torch.save(agent.state_dict(), args.log_weights + "/best.pt")
-            break
-    return results, agent
+        if ep % 5 == 0:
+            print("Episode: {}   Reward: {}/{}   Agent loss: {}".format(ep,
+                  reward_episode, num_gt, loss.cpu().detach().numpy()))
 
+        # Early stopping
+        if reward_episode == num_gt:
+            early_stopping += 1
+        else:
+            early_stopping = 0
+        if early_stopping == args.early_stopping:
+            torch.save(agent.state_dict(), args.log_weights + "/best.pt")
+            print("Early stopping")
+            print("Goal reached! Reward: {}/{}".format(reward_episode, num_gt))
+            break
+
+    return results, agent
 
 if __name__ == '__main__':
     seed()
     sys.path.append(os.getcwd())
     parser = argparse.ArgumentParser()
     parser.add_argument('--log_results',
-                        default="./log/train/results",
+                        default="./log/train/results/_test",
                         type=str,
                         help='Directory for results')
     parser.add_argument('--log_weights',
-                        default="./log/train/weights",
+                        default="./log/train/weights/_test",
                         type=str,
                         help='Directory for weights')
     parser.add_argument('--lr',
@@ -145,12 +155,25 @@ if __name__ == '__main__':
                         default=0.99,
                         type=float,
                         help='Gamma in Reinforcement Learning')
+    parser.add_argument('--early_stopping',
+                        default=50,
+                        type=int,
+                        help='Early stopping')
+    parser.add_argument('--episode',
+                        default=500,
+                        type=int,
+                        help='Early stopping')
 
     args = parser.parse_args()
-
+    if not os.path.exists(args.log_results):
+        os.makedirs(args.log_results)
+    if not os.path.exists(args.log_weights):
+        os.makedirs(args.log_weights)
     print("Beginning the training process...")
-    results, agent = train()
+    results, agent = train(args)
 
-    print("Saving results and plotting...")
+    print("Saving results...")
     torch.save(agent.state_dict(), args.log_weights + "/best.pt")
-    plot(results["training"], args.log_results, results["prob"])
+    plot(results["training"], args.log_results,
+         results["prob"], results["num_gt"])
+    print("Done!")

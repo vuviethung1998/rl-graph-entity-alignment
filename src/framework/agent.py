@@ -6,8 +6,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
+device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
+# device1 = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
+# device2 = torch.device('cuda:2' if torch.cuda.is_available() else 'cpu')
+device1 = torch.device('cpu')
+device2 = torch.device('cpu')
 
 class ValueFunctionNet(nn.Module):
     def __init__(self, state_size, hidden_size):
@@ -31,23 +34,23 @@ class GCN_layer(nn.Module):
         super(GCN_layer, self).__init__()
         self.fc = nn.Linear(input_shape, hidden_states)
         A = torch.from_numpy(first_adj_matrix).type(
-            torch.LongTensor).to(device)
-        I = torch.eye(A.shape[0]).to(device)
+            torch.LongTensor).to(device1)
+        I = torch.eye(A.shape[0]).to(device1)
         A_hat = A+I
         D = torch.sum(A_hat, axis=0)
         D = torch.diag(D)
         D_inv = torch.inverse(D)
-        self.A_hat_x = torch.mm(torch.mm(D_inv, A_hat), D_inv)
+        self.A_hat_x = torch.mm(torch.mm(D_inv, A_hat), D_inv).cuda(device)
 
         A = torch.from_numpy(second_adj_matrix).type(
-            torch.LongTensor).to(device).to(device)
-        I = torch.eye(A.shape[0]).to(device)
+            torch.LongTensor).to(device2).to(device2)
+        I = torch.eye(A.shape[0]).to(device2)
         A_hat = A+I
         D = torch.sum(A_hat, axis=0)
         D = torch.diag(D)
         D_inv = torch.inverse(D)
-        self.A_hat_y = torch.mm(torch.mm(D_inv, A_hat), D_inv)
-
+        self.A_hat_y = torch.mm(torch.mm(D_inv, A_hat), D_inv).cuda(device)
+        torch.cuda.empty_cache()
     def forward(self, i, input_features):
         if i == "x":
             aggregate = torch.mm(self.A_hat_x, input_features)
@@ -133,68 +136,68 @@ class Agent(nn.Module):
 
     # Train model using reinforcement learning
     def train_model_seq(self, first_embeddings, second_embeddings, net, transitions, optimizer):
-        with torch.autograd.set_detect_anomaly(True):
-            states, actions, rewards = transitions.state, transitions.action, transitions.reward
-            actions = torch.stack(actions).to(device)
-            rewards = torch.Tensor(rewards).to(device)
-            returns = torch.zeros_like(rewards).to(device)
-            vf = torch.zeros_like(rewards).to(device)
+        # with torch.autograd.set_detect_anomaly(True):
+        states, actions, rewards = transitions.state, transitions.action, transitions.reward
+        actions = torch.stack(actions).to(device)
+        rewards = torch.Tensor(rewards).to(device)
+        returns = torch.zeros_like(rewards).to(device)
+        vf = torch.zeros_like(rewards).to(device)
 
-            running_return = 0
-            for t in reversed(range(len(rewards))):
-                # calculate G, begin from the last transition
-                running_return = rewards[t] + self.gamma * running_return
-                returns[t] = running_return
-                if returns.sum() == 0:
-                    vf[t] = 0.01
-                else:
-                    vf[t] = running_return/returns.sum()
-                
-                policy = net(first_embeddings, second_embeddings, [states[t]], start_episode=False)
-                # get value function estimates
-                # advantage = returns - vf
-                advantage = returns[t]
-                
-                # loss
-                a = torch.unsqueeze(actions[t], 0)
-                log_policies = (torch.log(policy) *a.detach()).sum(dim=1)
-                loss = (-log_policies * advantage).sum()
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-
-        return loss
-
-    def train_model_batch(self, first_embeddings, second_embeddings, net, transitions, optimizer):
-        with torch.autograd.set_detect_anomaly(True):
-            states, actions, rewards = transitions.state, transitions.action, transitions.reward
-            actions = torch.stack(actions).to(device)
-            rewards = torch.Tensor(rewards).to(device)
-            returns = torch.zeros_like(rewards).to(device)
-            policies = torch.zeros_like(actions).to(device)
-            vf = torch.zeros_like(rewards).to(device)
-
-            running_return = 0
-            for t in reversed(range(len(rewards))):
-                # calculate G, begin from the last transition
-                running_return = rewards[t] + self.gamma * running_return
-                returns[t] = running_return
-                if returns.sum() == 0:
-                    vf[t] = 0.01
-                else:
-                    vf[t] = running_return/returns.sum()
-                
-            policies = net(first_embeddings, second_embeddings, states, start_episode=False)
+        running_return = 0
+        for t in reversed(range(len(rewards))):
+            # calculate G, begin from the last transition
+            running_return = rewards[t] + self.gamma * running_return
+            returns[t] = running_return
+            if returns.sum() == 0:
+                vf[t] = 0.01
+            else:
+                vf[t] = running_return/returns.sum()
+            
+            policy = net(first_embeddings, second_embeddings, [states[t]], start_episode=False)
             # get value function estimates
             # advantage = returns - vf
             advantage = returns[t]
             
             # loss
-            log_policies = (torch.log(policies) *actions.detach()).sum(dim=1)
+            a = torch.unsqueeze(actions[t], 0)
+            log_policies = (torch.log(policy) *a.detach()).sum(dim=1)
             loss = (-log_policies * advantage).sum()
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+
+        return loss
+
+    def train_model_batch(self, first_embeddings, second_embeddings, net, transitions, optimizer):
+        # with torch.autograd.set_detect_anomaly(True):
+        states, actions, rewards = transitions.state, transitions.action, transitions.reward
+        actions = torch.stack(actions).to(device)
+        rewards = torch.Tensor(rewards).to(device)
+        returns = torch.zeros_like(rewards).to(device)
+        policies = torch.zeros_like(actions).to(device)
+        vf = torch.zeros_like(rewards).to(device)
+
+        running_return = 0
+        for t in reversed(range(len(rewards))):
+            # calculate G, begin from the last transition
+            running_return = rewards[t] + self.gamma * running_return
+            returns[t] = running_return
+            if returns.sum() == 0:
+                vf[t] = 0.01
+            else:
+                vf[t] = running_return/returns.sum()
+            
+        policies = net(first_embeddings, second_embeddings, states, start_episode=False)
+        # get value function estimates
+        # advantage = returns - vf
+        advantage = returns[t]
+        
+        # loss
+        log_policies = (torch.log(policies) *actions.detach()).sum(dim=1)
+        loss = (-log_policies * advantage).sum()
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
 
         return loss
 

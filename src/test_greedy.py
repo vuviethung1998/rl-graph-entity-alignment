@@ -23,4 +23,4 @@ def test(save=True, simi_matrix=None):
 
 if __name__=="__main__":
     alignment_rest_12, hits1_12, mr_12, mrr_12 = test()
-    print(alignment_rest_12)
+    # print(alignment_rest_12)
