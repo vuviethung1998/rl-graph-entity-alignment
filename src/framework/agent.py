@@ -1,3 +1,4 @@
+from operator import index
 from scipy import spatial
 import torch
 from torch.nn.parameter import Parameter
@@ -5,8 +6,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
+device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
+# device1 = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
+# device2 = torch.device('cuda:2' if torch.cuda.is_available() else 'cpu')
+device1 = torch.device('cpu')
+device2 = torch.device('cpu')
 
 class ValueFunctionNet(nn.Module):
     def __init__(self, state_size, hidden_size):
@@ -30,23 +34,23 @@ class GCN_layer(nn.Module):
         super(GCN_layer, self).__init__()
         self.fc = nn.Linear(input_shape, hidden_states)
         A = torch.from_numpy(first_adj_matrix).type(
-            torch.LongTensor).to(device)
-        I = torch.eye(A.shape[0]).to(device)
+            torch.LongTensor).to(device1)
+        I = torch.eye(A.shape[0]).to(device1)
         A_hat = A+I
         D = torch.sum(A_hat, axis=0)
         D = torch.diag(D)
         D_inv = torch.inverse(D)
-        self.A_hat_x = torch.mm(torch.mm(D_inv, A_hat), D_inv)
+        self.A_hat_x = torch.mm(torch.mm(D_inv, A_hat), D_inv).cuda(device)
 
         A = torch.from_numpy(second_adj_matrix).type(
-            torch.LongTensor).to(device).to(device)
-        I = torch.eye(A.shape[0]).to(device)
+            torch.LongTensor).to(device2).to(device2)
+        I = torch.eye(A.shape[0]).to(device2)
         A_hat = A+I
         D = torch.sum(A_hat, axis=0)
         D = torch.diag(D)
         D_inv = torch.inverse(D)
-        self.A_hat_y = torch.mm(torch.mm(D_inv, A_hat), D_inv)
-
+        self.A_hat_y = torch.mm(torch.mm(D_inv, A_hat), D_inv).cuda(device)
+        torch.cuda.empty_cache()
     def forward(self, i, input_features):
         if i == "x":
             aggregate = torch.mm(self.A_hat_x, input_features)
@@ -64,8 +68,8 @@ class Agent(nn.Module):
             first_adj_matrix, second_adj_matrix, input_shape, hidden_states)
         self.layer2 = GCN_layer(
             first_adj_matrix, second_adj_matrix, hidden_states, output_shape)
-        self.output_shape = output_shape
         self.gamma = gamma
+        self.similarity_matrix = None
 
         if activation == 'Tanh':
             self.activation = nn.Tanh()
@@ -84,19 +88,14 @@ class Agent(nn.Module):
         self.W_f = Parameter(torch.rand(
             output_shape, 1).to(device), requires_grad=True)
 
-    # Gett k nearest opponents for mutual information estimator
-    def get_k_nearest_opponent(self, G, node, k=3):
-        G_list = [(i, item) for i, item in enumerate(G)]
-        # Tìm nearest thế này là gồm cả chính node đó
-        nearest_node = sorted(G_list, key=(lambda other_node: F.cosine_similarity(
-            torch.reshape(other_node[1], (1, -1)), node)), reverse=True)
-        k_nearest_opponent = nearest_node[:k]
-        k_nearest_opponent_vector = [G[item[0]] for item in k_nearest_opponent]
-        return k_nearest_opponent_vector
 
-    def forward(self, first_embeddings, second_embeddings, state):
-        index_x = state[0]
-        index_y = state[1]
+    def build_similarity_matrix(self, G_x, G_y):
+        return torch.matmul(G_x, G_y.T)
+    
+    def get_k_nearest_opponent(self, similarity_matrix, index_node, k=11):
+        return torch.topk(similarity_matrix[index_node], k).indices
+
+    def forward(self, first_embeddings, second_embeddings, states, start_episode):
         x = self.layer1("x", first_embeddings)
         x = self.activation(x)
         x = self.layer2("x", x)
@@ -106,19 +105,26 @@ class Agent(nn.Module):
         y = self.activation(y)
         y = self.layer2("y", y)
         G_y = self.activation(y)
-        g_x = torch.reshape(G_x[index_x], (1, self.output_shape))
-        g_y = torch.reshape(G_y[index_y], (1, self.output_shape))
+        lst_state_x = [G_x[s[0]] for s in states]
+        lst_state_y = [G_y[s[1]] for s in states]
+        # print(states)
+        g_x = torch.stack(lst_state_x)
+        g_y = torch.stack(lst_state_y)
 
         # Linear combination
         cat_gxgy = torch.cat((g_x, g_y), 1)
         h = self.sigmoid(self.fc_h(cat_gxgy))
-
+        
         # # Mutual information estimator
         # f = torch.matmul(torch.matmul(g_x, self.W_f), g_y)
-        # # Paper nói là k=10 nhưng bao gồm cả chính node e_y nên lấy k=11.
-        # k_nearest_opponent_vector = self.get_k_nearest_opponent(G_y, g_x, k=11)
         # f_oppo = torch.zeros_like(f)
-        # for oppo in k_nearest_opponent_vector:
+        # if start_episode:
+        #     self.similarity_matrix = self.build_similarity_matrix(G_x, G_y)
+        #     O_y_indices = self.get_k_nearest_opponent(self.similarity_matrix, index_x, k=11)
+        # else:
+        #     O_y_indices = self.get_k_nearest_opponent(self.similarity_matrix, index_x, k=11)
+        # O_y = G_y[O_y_indices]
+        # for oppo in O_y:
         #     oppo = torch.reshape(oppo, (1, oppo.shape[0]))
         #     f_oppo = torch.add(f_oppo, torch.exp(torch.matmul(torch.matmul(g_x, self.W_f), oppo)))
         # I = f/f_oppo
@@ -129,16 +135,15 @@ class Agent(nn.Module):
         return policy
 
     # Train model using reinforcement learning
-    def train_model(self, first_embeddings, second_embeddings, net, transitions, optimizer):
-
+    def train_model_seq(self, first_embeddings, second_embeddings, net, transitions, optimizer):
+        # with torch.autograd.set_detect_anomaly(True):
         states, actions, rewards = transitions.state, transitions.action, transitions.reward
         actions = torch.stack(actions).to(device)
         rewards = torch.Tensor(rewards).to(device)
         returns = torch.zeros_like(rewards).to(device)
-        policies = torch.zeros_like(actions).to(device)
         vf = torch.zeros_like(rewards).to(device)
-        running_return = 0
 
+        running_return = 0
         for t in reversed(range(len(rewards))):
             # calculate G, begin from the last transition
             running_return = rewards[t] + self.gamma * running_return
@@ -147,16 +152,48 @@ class Agent(nn.Module):
                 vf[t] = 0.01
             else:
                 vf[t] = running_return/returns.sum()
+            
+            policy = net(first_embeddings, second_embeddings, [states[t]], start_episode=False)
+            # get value function estimates
+            # advantage = returns - vf
+            advantage = returns[t]
+            
+            # loss
+            a = torch.unsqueeze(actions[t], 0)
+            log_policies = (torch.log(policy) *a.detach()).sum(dim=1)
+            loss = (-log_policies * advantage).sum()
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
-            policies[t] = net(first_embeddings, second_embeddings, states[t])
+        return loss
 
+    def train_model_batch(self, first_embeddings, second_embeddings, net, transitions, optimizer):
+        # with torch.autograd.set_detect_anomaly(True):
+        states, actions, rewards = transitions.state, transitions.action, transitions.reward
+        actions = torch.stack(actions).to(device)
+        rewards = torch.Tensor(rewards).to(device)
+        returns = torch.zeros_like(rewards).to(device)
+        policies = torch.zeros_like(actions).to(device)
+        vf = torch.zeros_like(rewards).to(device)
+
+        running_return = 0
+        for t in reversed(range(len(rewards))):
+            # calculate G, begin from the last transition
+            running_return = rewards[t] + self.gamma * running_return
+            returns[t] = running_return
+            if returns.sum() == 0:
+                vf[t] = 0.01
+            else:
+                vf[t] = running_return/returns.sum()
+            
+        policies = net(first_embeddings, second_embeddings, states, start_episode=False)
         # get value function estimates
         # advantage = returns - vf
-        advantage = returns
+        advantage = returns[t]
+        
         # loss
-        # sum all features/embedding vectors of the state
-        log_policies = (torch.log(policies) *
-                        actions.detach()).sum(dim=1)
+        log_policies = (torch.log(policies) *actions.detach()).sum(dim=1)
         loss = (-log_policies * advantage).sum()
         optimizer.zero_grad()
         loss.backward()
@@ -164,8 +201,8 @@ class Agent(nn.Module):
 
         return loss
 
-    def get_action(self, first_embeddings, second_embeddings, state):
-        policy = self.forward(first_embeddings, second_embeddings, state)
+    def get_action(self, first_embeddings, second_embeddings, state, start_episode):
+        policy = self.forward(first_embeddings, second_embeddings, state, start_episode)
         p = policy[0].cpu().data.numpy()
         action = np.random.choice(2, 1, p=p)[0]
         return action, p
